@@ -2,6 +2,7 @@
 # (C) Mike Bos 2025
 # License: GPL-3.0
 # Version: 0.1
+# uses https://github.com/OpenTaal/opentaal-wordlist
 # This script generates a secure password based on Dutch words with hyphens.
 
 import random
@@ -113,6 +114,7 @@ def genereer_meerdere_wachtwoorden(woordenlijst, aantal=5):
 # Hoofdprogramma
 if __name__ == "__main__":
     # OpenTaal woordenlijst URL
+    # Main site: https://github.com/OpenTaal/opentaal-wordlist
     url = "https://raw.githubusercontent.com/OpenTaal/opentaal-wordlist/refs/heads/master/wordlist.txt"
     
     # Download en filter de woordenlijst
