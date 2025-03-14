@@ -1,23 +1,48 @@
 #! /usr/bin/env python3.9
 # (C) Mike Bos 2025
 # License: GPL-3.0
-# Version: 0.3
+# Version: 0.4
+#
 # uses https://github.com/OpenTaal/opentaal-wordlist
 # This script generates a secure password based on Dutch words with hyphens.
+#
+# Usage:
+#   ./gen_pass.py [options]
+#
+# Options:
+#   -h, --help                      Toon deze help informatie
+#   -v, --verbose                   Toon uitgebreide informatie tijdens generatie
+#   -n, --aantal N                  Aantal te genereren wachtwoorden (default: 1)
+#   --min-woord-lengte N            Minimale lengte van een woord (default: 4)
+#   --max-woord-lengte N            Maximale lengte van een woord (default: 8)
+#   --min-wachtwoord-lengte N       Minimale lengte van een wachtwoord (default: 10)
+#   --min-aantal-woorden N          Minimale aantal woorden per wachtwoord (default: 3)
+#   --max-aantal-woorden N          Maximale aantal woorden per wachtwoord (default: 4)
+#   --speciale-tekens CHARS         Te gebruiken speciale tekens (default: "!@#$%^&*()_+=[]{}:;,./<>?")
+#   --url URL                       Aangepaste URL voor de woordenlijst
+#
+# Voorbeelden:
+#   ./gen_pass.py                   Genereer één wachtwoord
+#   ./gen_pass.py -n 5              Genereer 5 wachtwoorden
+#   ./gen_pass.py -v                Genereer één wachtwoord met uitgebreide informatie
+#   ./gen_pass.py -n 3 -v           Genereer 3 wachtwoorden met uitgebreide informatie
+#   ./gen_pass.py --min-woord-lengte 5 --max-woord-lengte 7  Gebruik woorden van 5-7 letters
+#   ./gen_pass.py --min-wachtwoord-lengte 12  Maak wachtwoorden van minimaal 12 tekens
+#   ./gen_pass.py --speciale-tekens "!@#$%"   Gebruik alleen deze speciale tekens
 
 import random
 import string
 import requests
 import argparse
 
-# Constanten
-OPENTAAL_URL = "https://raw.githubusercontent.com/OpenTaal/opentaal-wordlist/refs/heads/master/wordlist.txt"
-MIN_WOORD_LENGTE = 4
-MAX_WOORD_LENGTE = 8
-MIN_WACHTWOORD_LENGTE = 10
-MIN_AANTAL_WOORDEN = 3
-MAX_AANTAL_WOORDEN = 4
-SPECIALE_TEKENS = "!@#$%^&*()_+=[]{}:;,./<>?"
+# Default constanten
+DEFAULT_OPENTAAL_URL = "https://raw.githubusercontent.com/OpenTaal/opentaal-wordlist/refs/heads/master/wordlist.txt"
+DEFAULT_MIN_WOORD_LENGTE = 4
+DEFAULT_MAX_WOORD_LENGTE = 8
+DEFAULT_MIN_WACHTWOORD_LENGTE = 10
+DEFAULT_MIN_AANTAL_WOORDEN = 3
+DEFAULT_MAX_AANTAL_WOORDEN = 4
+DEFAULT_SPECIALE_TEKENS = "!@#$%^&*()_+=[]{}:;,./<>?"
 FALLBACK_WOORDENLIJST = [
     "fiets", "tulp", "kaas", "klompen", "windmolen", "stroopwafel", "oranje", 
     "water", "polder", "bloem", "koning", "stamppot", "gracht", "gezellig", 
@@ -25,7 +50,7 @@ FALLBACK_WOORDENLIJST = [
 ]
 POSITIE_OPTIES = ["begin", "midden", "eind", "tussen_woorden"]
 
-def download_woordenlijst(url, verbose=False):
+def download_woordenlijst(url, min_woord_lengte, max_woord_lengte, verbose=False):
     """Download de OpenTaal woordenlijst en filter op geschikte woorden."""
     try:
         response = requests.get(url)
@@ -36,7 +61,7 @@ def download_woordenlijst(url, verbose=False):
         
         # Filter woorden (verwijder te korte of te lange woorden en woorden met speciale tekens)
         geschikte_woorden = [woord for woord in alle_woorden 
-                             if MIN_WOORD_LENGTE <= len(woord) <= MAX_WOORD_LENGTE and  # Niet te kort of te lang
+                             if min_woord_lengte <= len(woord) <= max_woord_lengte and  # Niet te kort of te lang
                              woord.isalpha() and          # Alleen letters
                              "'" not in woord]            # Geen apostrofs
         
@@ -50,24 +75,28 @@ def download_woordenlijst(url, verbose=False):
             print(f"Fout bij het downloaden van de woordenlijst: {e}")
             print("Gebruik van fallback woordenlijst.")
         # Gebruik een beperkte fallback lijst als het downloaden mislukt
-        return FALLBACK_WOORDENLIJST
+        return [w for w in FALLBACK_WOORDENLIJST 
+                if min_woord_lengte <= len(w) <= max_woord_lengte]
 
-def is_veilig_wachtwoord(wachtwoord):
+def is_veilig_wachtwoord(wachtwoord, min_wachtwoord_lengte, speciale_tekens):
     """Controleert of het wachtwoord voldoet aan alle veiligheidseisen."""
-    if len(wachtwoord) < MIN_WACHTWOORD_LENGTE:
+    if len(wachtwoord) < min_wachtwoord_lengte:
         return False
     if not any(c.isupper() for c in wachtwoord):  # Minstens 1 hoofdletter
         return False
     if not any(c.isdigit() for c in wachtwoord):  # Minstens 1 cijfer
         return False
-    if not any(c in string.punctuation for c in wachtwoord):  # Minstens 1 speciaal teken
+    if not any(c in speciale_tekens for c in wachtwoord):  # Minstens 1 speciaal teken
         return False
     return True
 
-def genereer_wachtwoord(woordenlijst, verbose=False):
+def genereer_wachtwoord(woordenlijst, min_aantal_woorden, max_aantal_woorden, 
+                        min_wachtwoord_lengte, speciale_tekens, verbose=False):
     """Genereert een wachtwoord gebaseerd op Nederlandse woorden met koppeltekens."""
-    # Kies 3-4 willekeurige Nederlandse woorden
-    aantal_woorden = random.randint(MIN_AANTAL_WOORDEN, MAX_AANTAL_WOORDEN)
+    # Kies willekeurige Nederlandse woorden
+    aantal_woorden = random.randint(min_aantal_woorden, max_aantal_woorden)
+    # Beperk het aantal woorden tot wat beschikbaar is in de woordenlijst
+    aantal_woorden = min(aantal_woorden, len(woordenlijst))
     gekozen_woorden = random.sample(woordenlijst, aantal_woorden)
     
     if verbose:
@@ -81,7 +110,7 @@ def genereer_wachtwoord(woordenlijst, verbose=False):
     cijfer = str(random.randint(0, 9))
     
     # Kies een speciaal teken
-    speciaal_teken = random.choice(SPECIALE_TEKENS)
+    speciaal_teken = random.choice(speciale_tekens) if speciale_tekens else "!"
     
     # Combineer de woorden met koppeltekens
     wachtwoord_basis = "-".join(gekozen_woorden)
@@ -121,9 +150,9 @@ def genereer_wachtwoord(woordenlijst, verbose=False):
             wachtwoord = wachtwoord_basis + cijfer + speciaal_teken
     
     # Controleer of het wachtwoord lang genoeg is
-    if len(wachtwoord) < MIN_WACHTWOORD_LENGTE:
+    if len(wachtwoord) < min_wachtwoord_lengte:
         # Voeg extra cijfers toe indien nodig
-        extra_cijfers = "".join(str(random.randint(0, 9)) for _ in range(MIN_WACHTWOORD_LENGTE - len(wachtwoord)))
+        extra_cijfers = "".join(str(random.randint(0, 9)) for _ in range(min_wachtwoord_lengte - len(wachtwoord)))
         wachtwoord += extra_cijfers
         if verbose:
             print(f"Wachtwoord was te kort, extra cijfers toegevoegd: {extra_cijfers}")
@@ -134,20 +163,25 @@ def genereer_wachtwoord(woordenlijst, verbose=False):
     
     return wachtwoord
 
-def genereer_meerdere_wachtwoorden(woordenlijst, aantal=1, verbose=False):
+def genereer_meerdere_wachtwoorden(woordenlijst, aantal=1, min_aantal_woorden=DEFAULT_MIN_AANTAL_WOORDEN, 
+                                  max_aantal_woorden=DEFAULT_MAX_AANTAL_WOORDEN, 
+                                  min_wachtwoord_lengte=DEFAULT_MIN_WACHTWOORD_LENGTE,
+                                  speciale_tekens=DEFAULT_SPECIALE_TEKENS, verbose=False):
     """Genereert een opgegeven aantal wachtwoorden."""
     wachtwoorden = []
     for i in range(aantal):
         if verbose:
             print(f"\nWachtwoord {i+1}/{aantal} genereren...")
         
-        wachtwoord = genereer_wachtwoord(woordenlijst, verbose)
+        wachtwoord = genereer_wachtwoord(woordenlijst, min_aantal_woorden, max_aantal_woorden, 
+                                        min_wachtwoord_lengte, speciale_tekens, verbose)
         pogingen = 1
         
-        while not is_veilig_wachtwoord(wachtwoord):
+        while not is_veilig_wachtwoord(wachtwoord, min_wachtwoord_lengte, speciale_tekens):
             if verbose:
                 print(f"Wachtwoord voldoet niet aan veiligheidseisen. Nieuwe poging ({pogingen+1})...")
-            wachtwoord = genereer_wachtwoord(woordenlijst, verbose)
+            wachtwoord = genereer_wachtwoord(woordenlijst, min_aantal_woorden, max_aantal_woorden, 
+                                            min_wachtwoord_lengte, speciale_tekens, verbose)
             pogingen += 1
             
         if verbose:
@@ -158,9 +192,28 @@ def genereer_meerdere_wachtwoorden(woordenlijst, aantal=1, verbose=False):
 
 def parse_arguments():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description='Genereer veilige wachtwoorden gebaseerd op Nederlandse woorden.')
-    parser.add_argument('-v', '--verbose', action='store_true', help='Toon uitgebreide informatie tijdens generatie')
-    parser.add_argument('-n', '--aantal', type=int, default=1, help='Aantal te genereren wachtwoorden (default: 1)')
+    parser = argparse.ArgumentParser(
+        description='Genereer veilige wachtwoorden gebaseerd op Nederlandse woorden.',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument('-v', '--verbose', action='store_true', 
+                        help='Toon uitgebreide informatie tijdens generatie')
+    parser.add_argument('-n', '--aantal', type=int, default=1, 
+                        help='Aantal te genereren wachtwoorden')
+    parser.add_argument('--min-woord-lengte', type=int, default=DEFAULT_MIN_WOORD_LENGTE, 
+                        help='Minimale lengte van een woord')
+    parser.add_argument('--max-woord-lengte', type=int, default=DEFAULT_MAX_WOORD_LENGTE, 
+                        help='Maximale lengte van een woord')
+    parser.add_argument('--min-wachtwoord-lengte', type=int, default=DEFAULT_MIN_WACHTWOORD_LENGTE, 
+                        help='Minimale lengte van een wachtwoord')
+    parser.add_argument('--min-aantal-woorden', type=int, default=DEFAULT_MIN_AANTAL_WOORDEN, 
+                        help='Minimale aantal woorden per wachtwoord')
+    parser.add_argument('--max-aantal-woorden', type=int, default=DEFAULT_MAX_AANTAL_WOORDEN, 
+                        help='Maximale aantal woorden per wachtwoord')
+    parser.add_argument('--speciale-tekens', type=str, default=DEFAULT_SPECIALE_TEKENS, 
+                        help='Te gebruiken speciale tekens')
+    parser.add_argument('--url', type=str, default=DEFAULT_OPENTAAL_URL, 
+                        help='Aangepaste URL voor de woordenlijst')
     return parser.parse_args()
 
 # Hoofdprogramma
@@ -168,15 +221,50 @@ if __name__ == "__main__":
     # Parse command line arguments
     args = parse_arguments()
     
+    # Validate arguments
+    if args.min_woord_lengte > args.max_woord_lengte:
+        print("Fout: min-woord-lengte moet kleiner of gelijk zijn aan max-woord-lengte")
+        exit(1)
+    if args.min_aantal_woorden > args.max_aantal_woorden:
+        print("Fout: min-aantal-woorden moet kleiner of gelijk zijn aan max-aantal-woorden")
+        exit(1)
+    if args.min_woord_lengte < 1:
+        print("Fout: min-woord-lengte moet ten minste 1 zijn")
+        exit(1)
+    if args.min_wachtwoord_lengte < 6:
+        print("Waarschuwing: Een wachtwoord korter dan 6 tekens wordt niet aanbevolen")
+        
     if args.verbose:
         print(f"Genereren van {args.aantal} wachtwoord(en)...")
+        print(f"Instellingen:")
+        print(f"  - Woord lengte: {args.min_woord_lengte}-{args.max_woord_lengte} tekens")
+        print(f"  - Wachtwoord minimale lengte: {args.min_wachtwoord_lengte} tekens")
+        print(f"  - Aantal woorden per wachtwoord: {args.min_aantal_woorden}-{args.max_aantal_woorden}")
+        print(f"  - Speciale tekens: {args.speciale_tekens}")
         print("Woordenlijst downloaden en filteren...")
     
     # Download en filter de woordenlijst
-    woordenlijst = download_woordenlijst(OPENTAAL_URL, args.verbose)
+    woordenlijst = download_woordenlijst(args.url, args.min_woord_lengte, 
+                                         args.max_woord_lengte, args.verbose)
+    
+    if len(woordenlijst) < args.max_aantal_woorden:
+        if args.verbose:
+            print(f"Waarschuwing: Slechts {len(woordenlijst)} geschikte woorden gevonden")
+            print("Het aantal woorden per wachtwoord wordt aangepast")
+        if len(woordenlijst) == 0:
+            print("Fout: Geen geschikte woorden gevonden. Probeer andere woord lengtes.")
+            exit(1)
     
     # Genereer de wachtwoorden
-    wachtwoorden = genereer_meerdere_wachtwoorden(woordenlijst, args.aantal, args.verbose)
+    wachtwoorden = genereer_meerdere_wachtwoorden(
+        woordenlijst, 
+        args.aantal, 
+        args.min_aantal_woorden, 
+        args.max_aantal_woorden, 
+        args.min_wachtwoord_lengte,
+        args.speciale_tekens,
+        args.verbose
+    )
     
     # Print alleen de resulterende wachtwoorden
     for wachtwoord in wachtwoorden:
