@@ -1,0 +1,3 @@
+([('SynStatus',
+   '/Users/mikebos/Scripts/SynStatus/dist/SynStatus',
+   'EXECUTABLE')],)
