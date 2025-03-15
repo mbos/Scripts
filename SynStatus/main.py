@@ -23,6 +23,9 @@ LOG_PATHS = {
     'deurbel': '/var/services/homes/Mike/deurbel_cleanup.log'
 }
 
+# Constante voor het pad naar VS Code
+VSCODE_PATH = '/usr/local/bin/code'
+
 # Lokalisatie strings
 TRANSLATIONS = {
     'nl_NL': {
@@ -501,7 +504,7 @@ class SynologyMaintenanceApp(QMainWindow):
                     -- Start SSH verbinding
                     write text "ssh ''' + username + '@' + hostname + '''"
                     -- Wacht even tot de password prompt verschijnt
-                    delay 1.5
+                    delay 2
                     -- Vul wachtwoord in
                     write text "''' + password + '''"
                 end tell
@@ -663,7 +666,7 @@ class SynologyMaintenanceApp(QMainWindow):
         try:
             # Controleer eerst of VSCode beschikbaar is
             try:
-                subprocess.run(['which', 'code'], check=True, capture_output=True)
+                subprocess.run(['which', VSCODE_PATH], check=True, capture_output=True)
             except subprocess.CalledProcessError as e:
                 QMessageBox.warning(
                     self,
@@ -708,7 +711,7 @@ class SynologyMaintenanceApp(QMainWindow):
 
             # Open het bestand in VSCode
             try:
-                subprocess.run(['code', temp_file])
+                subprocess.run([VSCODE_PATH, temp_file])
             except subprocess.SubprocessError as e:
                 QMessageBox.warning(self, TRANSLATIONS[self.lang]['warning_title'],
                                     f"Fout bij starten VSCode: {str(e)}")
