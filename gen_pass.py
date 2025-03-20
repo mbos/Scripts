@@ -70,7 +70,7 @@ def download_woordenlijst(url, min_woord_lengte, max_woord_lengte, verbose=False
             print(f"Aantal geschikte woorden: {len(geschikte_woorden)}")
             
         return geschikte_woorden
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         if verbose:
             print(f"Fout bij het downloaden van de woordenlijst: {e}")
             print("Gebruik van fallback woordenlijst.")
@@ -95,8 +95,16 @@ def genereer_wachtwoord(woordenlijst, min_aantal_woorden, max_aantal_woorden,
     """Genereert een wachtwoord gebaseerd op Nederlandse woorden met koppeltekens."""
     # Kies willekeurige Nederlandse woorden
     aantal_woorden = random.randint(min_aantal_woorden, max_aantal_woorden)
+    
     # Beperk het aantal woorden tot wat beschikbaar is in de woordenlijst
     aantal_woorden = min(aantal_woorden, len(woordenlijst))
+    
+    # Check if the min_aantal_woorden is greater than the length of the word list
+    if min_aantal_woorden > len(woordenlijst):
+        if verbose:
+            print("Niet genoeg woorden in de lijst om aan de minimale woordvereiste te voldoen.")
+        return None
+    
     gekozen_woorden = random.sample(woordenlijst, aantal_woorden)
     
     if verbose:
@@ -110,7 +118,7 @@ def genereer_wachtwoord(woordenlijst, min_aantal_woorden, max_aantal_woorden,
     cijfer = str(random.randint(0, 9))
     
     # Kies een speciaal teken
-    speciaal_teken = random.choice(speciale_tekens) if speciale_tekens else "!"
+    speciaal_teken = random.choice(speciale_tekens)
     
     # Combineer de woorden met koppeltekens
     wachtwoord_basis = "-".join(gekozen_woorden)
@@ -133,10 +141,10 @@ def genereer_wachtwoord(woordenlijst, min_aantal_woorden, max_aantal_woorden,
     elif gekozen_positie == "midden":
         # Voeg het cijfer en speciale teken in het midden van een willekeurig woord
         midden_woord_index = random.randint(0, aantal_woorden - 1)
-        woord_delen = list(wachtwoord_basis)
-        midden_index = len(wachtwoord_basis) // 2
-        woord_delen.insert(midden_index, cijfer + speciaal_teken)
-        wachtwoord = "".join(woord_delen)
+        woord = gekozen_woorden[midden_woord_index]
+        midden_index = len(woord) // 2
+        gekozen_woorden[midden_woord_index] = woord[:midden_index] + cijfer + speciaal_teken + woord[midden_index:]
+        wachtwoord = "-".join(gekozen_woorden)
     else:  # tussen_woorden
         # Vervang een koppelteken door het cijfer en speciale teken
         if "-" in wachtwoord_basis:
@@ -175,6 +183,12 @@ def genereer_meerdere_wachtwoorden(woordenlijst, aantal=1, min_aantal_woorden=DE
         
         wachtwoord = genereer_wachtwoord(woordenlijst, min_aantal_woorden, max_aantal_woorden, 
                                         min_wachtwoord_lengte, speciale_tekens, verbose)
+        # If the password is None, it means that there were not enough words in the list
+        if wachtwoord is None:
+            if verbose:
+                print("Wachtwoord generatie mislukt (niet genoeg woorden).")
+            continue
+            
         pogingen = 1
         
         while not is_veilig_wachtwoord(wachtwoord, min_wachtwoord_lengte, speciale_tekens):
@@ -182,12 +196,16 @@ def genereer_meerdere_wachtwoorden(woordenlijst, aantal=1, min_aantal_woorden=DE
                 print(f"Wachtwoord voldoet niet aan veiligheidseisen. Nieuwe poging ({pogingen+1})...")
             wachtwoord = genereer_wachtwoord(woordenlijst, min_aantal_woorden, max_aantal_woorden, 
                                             min_wachtwoord_lengte, speciale_tekens, verbose)
+            if wachtwoord is None:
+                if verbose:
+                    print("Wachtwoord generatie mislukt (niet genoeg woorden).")
+                break
             pogingen += 1
             
-        if verbose:
-            print(f"Veilig wachtwoord gegenereerd na {pogingen} poging(en).")
-            
-        wachtwoorden.append(wachtwoord)
+        if wachtwoord is not None:
+            if verbose:
+                print(f"Veilig wachtwoord gegenereerd na {pogingen} poging(en).")
+            wachtwoorden.append(wachtwoord)
     return wachtwoorden
 
 def parse_arguments():
@@ -218,6 +236,9 @@ def parse_arguments():
 
 # Hoofdprogramma
 if __name__ == "__main__":
+    # Initialize random seed
+    random.seed()
+    
     # Parse command line arguments
     args = parse_arguments()
     
@@ -268,4 +289,5 @@ if __name__ == "__main__":
     
     # Print alleen de resulterende wachtwoorden
     for wachtwoord in wachtwoorden:
-        print(f"{wachtwoord}")
+        if wachtwoord is not None:
+            print(f"{wachtwoord}")
