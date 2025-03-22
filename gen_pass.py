@@ -1,7 +1,7 @@
 #! /usr/bin/env python3.9
 # (C) Mike Bos 2025
 # License: GPL-3.0
-# Version: 0.7
+# Version: 0.7.1
 #
 # uses https://github.com/OpenTaal/opentaal-wordlist
 # This script generates a secure password based on Dutch words with hyphens.
@@ -48,7 +48,8 @@ DEFAULT_MIN_WACHTWOORD_LENGTE = 10
 DEFAULT_MIN_AANTAL_WOORDEN = 3
 DEFAULT_MAX_AANTAL_WOORDEN = 4
 DEFAULT_SPECIALE_TEKENS = "!@#$%^&*()_+=[]{}:;,./<>?"
-DEFAULT_DB_NAAM = "opentaal_woorden.db"
+# Maak het database pad absoluut, relatief aan de locatie van dit script
+DEFAULT_DB_NAAM = os.path.join(os.path.dirname(os.path.abspath(__file__)), "opentaal_woorden.db")
 DEFAULT_MAX_POGINGEN = 20
 POSITIE_OPTIES = ["begin", "midden", "eind", "tussen_woorden"]
 
