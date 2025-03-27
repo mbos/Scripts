@@ -1,7 +1,7 @@
 #! /usr/bin/env python3.9
 # (C) Mike Bos 2025
 # License: GPL-3.0
-# Version: 0.7.1
+# Version: 0.7.2
 #
 # uses https://github.com/OpenTaal/opentaal-wordlist
 # This script generates a secure password based on Dutch words with hyphens.
@@ -39,6 +39,7 @@ import requests
 import argparse
 import os
 import sqlite3
+import sys
 
 # Default constanten
 DEFAULT_OPENTAAL_URL = "https://raw.githubusercontent.com/OpenTaal/opentaal-wordlist/refs/heads/master/wordlist.txt"
@@ -55,23 +56,27 @@ POSITIE_OPTIES = ["begin", "midden", "eind", "tussen_woorden"]
 
 def init_database(db_naam):
     """Initialiseer de SQLite database."""
-    conn = sqlite3.connect(db_naam)
-    cursor = conn.cursor()
-    
-    # Maak de tabel voor woorden aan als deze nog niet bestaat
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS woorden (
-        id INTEGER PRIMARY KEY,
-        woord TEXT UNIQUE,
-        lengte INTEGER
-    )
-    ''')
-    
-    # Maak een index aan op de lengte kolom voor snellere queries
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_lengte ON woorden(lengte)')
-    
-    conn.commit()
-    return conn
+    try:
+        conn = sqlite3.connect(db_naam)
+        cursor = conn.cursor()
+        
+        # Maak de tabel voor woorden aan als deze nog niet bestaat
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS woorden (
+            id INTEGER PRIMARY KEY,
+            woord TEXT UNIQUE,
+            lengte INTEGER
+        )
+        ''')
+        
+        # Maak een index aan op de lengte kolom voor snellere queries
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_lengte ON woorden(lengte)')
+        
+        conn.commit()
+        return conn
+    except sqlite3.Error as e:
+        print(f"Fout bij initialiseren database: {e}", file=sys.stderr)
+        return None
 
 def check_database_exists(db_naam):
     """Controleer of de database bestaat en woorden bevat."""
@@ -102,8 +107,8 @@ def check_and_repair_database(db_naam, verbose=False):
             
             if result != "ok":
                 if verbose:
-                    print(f"Database integriteitscontrole mislukt: {result}")
-                    print("Database wordt verwijderd en opnieuw aangemaakt.")
+                    print(f"Database integriteitscontrole mislukt: {result}", file=sys.stderr)
+                    print("Database wordt verwijderd en opnieuw aangemaakt.", file=sys.stderr)
                 
                 # Sluit de verbinding en verwijder de corrupte database
                 conn.close()
@@ -114,7 +119,7 @@ def check_and_repair_database(db_naam, verbose=False):
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='woorden'")
             if not cursor.fetchone():
                 if verbose:
-                    print("Tabel 'woorden' niet gevonden in database.")
+                    print("Tabel 'woorden' niet gevonden in database.", file=sys.stderr)
                 return False
             
             cursor.execute("SELECT COUNT(*) FROM woorden")
@@ -126,118 +131,150 @@ def check_and_repair_database(db_naam, verbose=False):
             return count > 0
     except sqlite3.Error as e:
         if verbose:
-            print(f"Fout bij het controleren van de database: {e}")
-            print("Database wordt verwijderd en opnieuw aangemaakt.")
+            print(f"Fout bij het controleren van de database: {e}", file=sys.stderr)
+            print("Database wordt verwijderd en opnieuw aangemaakt.", file=sys.stderr)
         
         # Verwijder de corrupte database
         try:
             os.remove(db_naam)
-        except OSError:
-            pass
+        except OSError as oe:
+            if verbose:
+                print(f"Kon database bestand {db_naam} niet verwijderen: {oe}", file=sys.stderr)
         
         return False
 
 def download_and_create_database(url, db_naam, verbose=False):
     """Download de OpenTaal woordenlijst en sla deze op in een SQLite database."""
+    conn = None
     try:
         if verbose:
             print("Woordenlijst downloaden...")
-        
-        response = requests.get(url, timeout=30)  # Voeg timeout toe
-        response.raise_for_status()  # Controleer of de download succesvol is
-        
-        # Haal alle woorden op
+
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+
         alle_woorden = response.text.splitlines()
-        
+
         if verbose:
             print(f"Aantal woorden gedownload: {len(alle_woorden)}")
             print("Database aanmaken...")
-        
-        # Initialiseer de database
+
         conn = init_database(db_naam)
+        if conn is None:
+            raise RuntimeError("Database initialisatie mislukt.")
+
         cursor = conn.cursor()
-        
-        # Filter woorden en voeg ze toe aan de database
-        toegevoegde_woorden = 0
+
+        # Prepare data for batch insertion
+        woorden_data = []
         for woord in alle_woorden:
-            if woord.isalpha() and "'" not in woord:  # Alleen letters, geen apostrofs
-                try:
-                    cursor.execute("INSERT INTO woorden (woord, lengte) VALUES (?, ?)", 
-                                  (woord, len(woord)))
-                    toegevoegde_woorden += 1
-                except sqlite3.IntegrityError:
-                    # Woord bestaat al in de database
-                    pass
-        
-        conn.commit()
-        
+            woord = woord.strip()
+            if woord.isalpha() and "'" not in woord:
+                woorden_data.append((woord, len(woord)))
+
+        if verbose:
+            print(f"Aantal woorden om toe te voegen aan database: {len(woorden_data)}")
+
+        try:
+            # Batch insert using executemany
+            cursor.executemany("INSERT INTO woorden (woord, lengte) VALUES (?, ?)", woorden_data)
+            conn.commit()
+            toegevoegde_woorden = len(woorden_data)
+        except sqlite3.IntegrityError:
+            pass
+
         if verbose:
             print(f"Aantal woorden toegevoegd aan database: {toegevoegde_woorden}")
-        
-        # Optimaliseer de database na het toevoegen van alle woorden
+
         optimize_database(conn, verbose)
-        
+
+        # Return the connection instead of closing it
         return conn
+
     except (requests.exceptions.RequestException, sqlite3.Error) as e:
         error_msg = f"Fout bij het downloaden of verwerken van de woordenlijst: {e}"
         if verbose:
-            print(error_msg)
-        # Verwijder de mogelijk gedeeltelijk aangemaakte database
+            print(error_msg, file=sys.stderr)
+
         if os.path.exists(db_naam):
             try:
                 os.remove(db_naam)
-            except OSError:
+            except OSError as oe:
                 if verbose:
-                    print(f"Kon database bestand {db_naam} niet verwijderen")
+                    print(f"Kon database bestand {db_naam} niet verwijderen: {oe}", file=sys.stderr)
+        
+        if conn:
+            conn.close()
         raise RuntimeError(error_msg)
 
 def get_woorden_from_database(conn, min_woord_lengte, max_woord_lengte, verbose=False):
     """Haal geschikte woorden op uit de database."""
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT woord FROM woorden WHERE lengte >= ? AND lengte <= ?",
-        (min_woord_lengte, max_woord_lengte)
-    )
-    
-    woorden = [row[0] for row in cursor.fetchall()]
-    
-    if verbose:
-        print(f"Aantal geschikte woorden uit database: {len(woorden)}")
-    
-    return woorden
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT woord FROM woorden WHERE lengte >= ? AND lengte <= ?",
+            (min_woord_lengte, max_woord_lengte)
+        )
+        
+        woorden = [row[0] for row in cursor.fetchall()]
+        
+        if verbose:
+            print(f"Aantal geschikte woorden uit database: {len(woorden)}")
+        
+        return woorden
+    except sqlite3.Error as e:
+        print(f"Fout bij ophalen woorden uit database: {e}", file=sys.stderr)
+        return []
 
 def optimize_database(conn, verbose=False):
     """Optimaliseer de database voor betere prestaties."""
-    if verbose:
-        print("Database optimaliseren...")
-    
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA optimize")
-    cursor.execute("VACUUM")
-    conn.commit()
-    
-    if verbose:
-        print("Database geoptimaliseerd.")
-    
-    return conn
+    try:
+        if verbose:
+            print("Database optimaliseren...")
+        
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA optimize")
+        cursor.execute("VACUUM")
+        conn.commit()
+        
+        if verbose:
+            print("Database geoptimaliseerd.")
+        
+        return conn
+    except sqlite3.Error as e:
+        print(f"Fout bij optimaliseren database: {e}", file=sys.stderr)
+        return conn
 
 def download_woordenlijst(url, min_woord_lengte, max_woord_lengte, db_naam=DEFAULT_DB_NAAM, verbose=False):
     """Download de OpenTaal woordenlijst of gebruik de database als deze bestaat."""
-    # Controleer of de database al bestaat en geldig is
-    if check_and_repair_database(db_naam, verbose):
-        if verbose:
-            print(f"Bestaande database '{db_naam}' gevonden, deze wordt gebruikt.")
+    woorden = []
+    conn = None
+    try:
+        # Controleer of de database al bestaat en geldig is
+        if check_and_repair_database(db_naam, verbose):
+            if verbose:
+                print(f"Bestaande database '{db_naam}' gevonden, deze wordt gebruikt.")
+            
+            conn = sqlite3.connect(db_naam)
+        else:
+            if verbose:
+                print(f"Geen database gevonden of database is ongeldig. Nieuwe database wordt aangemaakt.")
+            
+            conn = download_and_create_database(url, db_naam, verbose)
         
-        with sqlite3.connect(db_naam) as conn:
+        if conn:
             woorden = get_woorden_from_database(conn, min_woord_lengte, max_woord_lengte, verbose)
-    else:
-        if verbose:
-            print(f"Geen database gevonden of database is ongeldig. Nieuwe database wordt aangemaakt.")
-        
-        with download_and_create_database(url, db_naam, verbose) as conn:
-            woorden = get_woorden_from_database(conn, min_woord_lengte, max_woord_lengte, verbose)
-    
-    return woorden
+        else:
+            print("Kon geen database connectie maken.", file=sys.stderr)
+            return []
+            
+    except Exception as e:
+        print(f"Algemene fout bij downloaden/gebruiken woordenlijst: {e}", file=sys.stderr)
+        return []
+    finally:
+        if conn:
+            conn.close()
+        return woorden
 
 def is_veilig_wachtwoord(wachtwoord, min_wachtwoord_lengte, speciale_tekens):
     """Controleert of het wachtwoord voldoet aan alle veiligheidseisen."""
@@ -257,7 +294,7 @@ def genereer_wachtwoord(woordenlijst, min_aantal_woorden, max_aantal_woorden,
     # Controleer of er voldoende woorden zijn
     if len(woordenlijst) < min_aantal_woorden:
         if verbose:
-            print("Niet genoeg woorden in de lijst om aan de minimale woordvereiste te voldoen.")
+            print("Niet genoeg woorden in de lijst om aan de minimale woordvereiste te voldoen.", file=sys.stderr)
         return None
     
     # Kies willekeurige Nederlandse woorden
@@ -325,7 +362,9 @@ def genereer_wachtwoord(woordenlijst, min_aantal_woorden, max_aantal_woorden,
     # Controleer of het wachtwoord lang genoeg is
     if len(wachtwoord) < min_wachtwoord_lengte:
         # Voeg extra cijfers toe indien nodig
-        extra_cijfers = "".join(str(random.randint(0, 9)) for _ in range(min_wachtwoord_lengte - len(wachtwoord)))
+        aantal_extra_cijfers = min_wachtwoord_lengte - len(wachtwoord)
+        extra_cijfers = "".join(str(random.randint(0, 9)) for _ in range(aantal_extra_cijfers))
+
         wachtwoord += extra_cijfers
         if verbose:
             print(f"Wachtwoord was te kort, extra cijfers toegevoegd: {extra_cijfers}")
@@ -347,40 +386,33 @@ def genereer_meerdere_wachtwoorden(woordenlijst, aantal=1, min_aantal_woorden=DE
         if verbose:
             print(f"\nWachtwoord {i+1}/{aantal} genereren...")
         
-        wachtwoord = genereer_wachtwoord(woordenlijst, min_aantal_woorden, max_aantal_woorden, 
-                                        min_wachtwoord_lengte, speciale_tekens, verbose)
-        # Als het wachtwoord None is, betekent dit dat er niet genoeg woorden in de lijst zijn
-        if wachtwoord is None:
-            if verbose:
-                print("Wachtwoord generatie mislukt (niet genoeg woorden).")
-            continue
-            
-        pogingen = 1
+        wachtwoord = None
+        pogingen = 0
         
-        while not is_veilig_wachtwoord(wachtwoord, min_wachtwoord_lengte, speciale_tekens):
-            if pogingen >= max_pogingen:
-                if verbose:
-                    print(f"Maximaal aantal pogingen ({max_pogingen}) bereikt. Wachtwoord generatie gestopt.")
-                break
-                
-            if verbose:
-                print(f"Wachtwoord voldoet niet aan veiligheidseisen. Nieuwe poging ({pogingen+1})...")
-            
+        while pogingen < max_pogingen:
             wachtwoord = genereer_wachtwoord(woordenlijst, min_aantal_woorden, max_aantal_woorden, 
                                             min_wachtwoord_lengte, speciale_tekens, verbose)
+            # Als het wachtwoord None is, betekent dit dat er niet genoeg woorden in de lijst zijn
             if wachtwoord is None:
                 if verbose:
-                    print("Wachtwoord generatie mislukt (niet genoeg woorden).")
-                break
-            
+                    print("Wachtwoord generatie mislukt (niet genoeg woorden).", file=sys.stderr)
+                break # Exit the inner loop if no password generated due to lack of words
+
+            if is_veilig_wachtwoord(wachtwoord, min_wachtwoord_lengte, speciale_tekens):
+                break # Exit the loop if the password is secure
+
+            if verbose:
+                print(f"Wachtwoord voldoet niet aan veiligheidseisen. Nieuwe poging ({pogingen+1})...", file=sys.stderr)
+
             pogingen += 1
-            
+
         if wachtwoord is not None and is_veilig_wachtwoord(wachtwoord, min_wachtwoord_lengte, speciale_tekens):
             if verbose:
-                print(f"Veilig wachtwoord gegenereerd na {pogingen} poging(en).")
+                print(f"Veilig wachtwoord gegenereerd na {pogingen+1} poging(en).")
             wachtwoorden.append(wachtwoord)
-        elif verbose:
-            print("Kon geen veilig wachtwoord genereren, deze wordt overgeslagen.")
+        else:
+            if verbose:
+                print("Kon geen veilig wachtwoord genereren, deze wordt overgeslagen.", file=sys.stderr)
     
     return wachtwoorden
 
@@ -428,19 +460,19 @@ if __name__ == "__main__":
     
     # Validate arguments
     if args.min_woord_lengte > args.max_woord_lengte:
-        print("Fout: min-woord-lengte moet kleiner of gelijk zijn aan max-woord-lengte")
-        exit(1)
+        print("Fout: min-woord-lengte moet kleiner of gelijk zijn aan max-woord-lengte", file=sys.stderr)
+        sys.exit(1)
     if args.min_aantal_woorden > args.max_aantal_woorden:
-        print("Fout: min-aantal-woorden moet kleiner of gelijk zijn aan max-aantal-woorden")
-        exit(1)
+        print("Fout: min-aantal-woorden moet kleiner of gelijk zijn aan max-aantal-woorden", file=sys.stderr)
+        sys.exit(1)
     if args.min_woord_lengte < 1:
-        print("Fout: min-woord-lengte moet ten minste 1 zijn")
-        exit(1)
+        print("Fout: min-woord-lengte moet ten minste 1 zijn", file=sys.stderr)
+        sys.exit(1)
     if args.min_wachtwoord_lengte < 6:
-        print("Waarschuwing: Een wachtwoord korter dan 6 tekens wordt niet aanbevolen")
+        print("Waarschuwing: Een wachtwoord korter dan 6 tekens wordt niet aanbevolen", file=sys.stderr)
     if not args.speciale_tekens:
-        print("Fout: speciale-tekens mag niet leeg zijn")
-        exit(1)
+        print("Fout: speciale-tekens mag niet leeg zijn", file=sys.stderr)
+        sys.exit(1)
         
     if args.verbose:
         print(f"Genereren van {args.aantal} wachtwoord(en)...")
@@ -458,13 +490,14 @@ if __name__ == "__main__":
                                          args.max_woord_lengte, args.database, args.verbose)
     
     if len(woordenlijst) < args.min_aantal_woorden:
-        print(f"Fout: Slechts {len(woordenlijst)} geschikte woorden gevonden, maar {args.min_aantal_woorden} nodig.")
-        print("Probeer andere woord lengtes of een andere woordenlijst.")
-        exit(1)
+        print(f"Fout: Slechts {len(woordenlijst)} geschikte woorden gevonden, maar {args.min_aantal_woorden} nodig.", file=sys.stderr)
+        print("Probeer andere woord lengtes of een andere woordenlijst.", file=sys.stderr)
+        sys.exit(1)
 
     if len(woordenlijst) < args.max_aantal_woorden and args.verbose:
-        print(f"Waarschuwing: Slechts {len(woordenlijst)} geschikte woorden gevonden")
-        print(f"Het maximum aantal woorden per wachtwoord wordt aangepast naar {len(woordenlijst)}")
+        print(f"Waarschuwing: Slechts {len(woordenlijst)} geschikte woorden gevonden", file=sys.stderr)
+        print(f"Het maximum aantal woorden per wachtwoord wordt aangepast naar {len(woordenlijst)}", file=sys.stderr)
+        args.max_aantal_woorden = len(woordenlijst)
 
     # Genereer de wachtwoorden
     wachtwoorden = genereer_meerdere_wachtwoorden(
